@@ -7,8 +7,8 @@
 // @match        *://vendettagame.es/habitaciones*
 // @run-at       document-end
 // @grant        none
-// @updateURL
-// @downloadURL
+// @updateURL    https://github.com/dani-csg/rooms.costi-timer/raw/refs/heads/main/Rooms.Cost-Timer.user.js
+// @downloadURL  https://github.com/dani-csg/rooms.costi-timer/raw/refs/heads/main/Rooms.Cost-Timer.user.js
 // ==/UserScript==
 
 (function () {
