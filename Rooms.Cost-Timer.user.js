@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         mx.vendetta.rooms.cost-timer.
 // @namespace    mx.vendetta.rooms.cost-timer.
-// @version      2.1.1
+// @version      2.1.2
 // @description  Colori costi + tooltip IT con produzione, risorse mancanti e tempo di attesa (Costruibile tra).
 // @author       mx.
 // @match        *://vendettagame.es/habitaciones*
@@ -16,18 +16,16 @@
   const $ = window.jQuery;
   if (!$) return;
 
-  /* ==========================================================
-     STYLE
-  ========================================================== */
+  /* ================= STYLE ================= */
   function ensureStyle() {
     if (document.getElementById('vdRoomsStyle')) return;
     const css = `
-      .vd-cost-ok  { color:#14532d !important; font-weight:600; }
-      .vd-cost-bad { color:#7f1d1d !important; font-weight:600; }
+      .vd-cost-ok  { color:#14532d !important; font-weight:700; }
+      .vd-cost-bad { color:#7f1d1d !important; font-weight:700; }
 
       .vd-tooltip {
         position:absolute;
-        background:rgba(0,0,0,.80);
+        background:rgba(0,0,0,.85);
         color:#fff;
         padding:8px 10px;
         border-radius:6px;
@@ -44,221 +42,99 @@
       .vd-miss  { color:#b91c1c; }
       .vd-time  { color:#ffffff; }
     `;
-    const s = document.createElement('style');
-    s.id = 'vdRoomsStyle';
-    s.textContent = css;
-    document.head.appendChild(s);
+    $('<style id="vdRoomsStyle">').text(css).appendTo('head');
   }
 
-  /* ==========================================================
-     HELPERS
-  ========================================================== */
-  const parseNum = v =>
-    parseInt(String(v).replace(/[^0-9]/g, ''), 10) || 0;
+  /* ================= HELPERS ================= */
+  const parseNum = v => parseInt(String(v).replace(/[^0-9]/g,''),10) || 0;
 
-  function formatThousands(n) {
-    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  }
+  const fmt = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g,".");
 
-  function formatTime(sec) {
-    if (sec <= 0) return "00:00:00";
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = Math.floor(sec % 60);
-    return [h,m,s].map(v => String(v).padStart(2,'0')).join(":");
-  }
+  const fmtTime = s => {
+    const h=Math.floor(s/3600), m=Math.floor(s%3600/60), sec=s%60;
+    return [h,m,sec].map(v=>String(v).padStart(2,'0')).join(':');
+  };
 
-  /* ==========================================================
-     TOOLTIP
-  ========================================================== */
-  let tooltip = null;
+  /* ================= TOOLTIP ================= */
+  let tip=null;
+  const showTip=(e,h)=>{
+    if(!tip) tip=$('<div class="vd-tooltip">').appendTo('body');
+    tip.html(h).css({top:e.pageY+14,left:e.pageX+14}).show();
+  };
+  const hideTip=()=>tip&&tip.hide();
 
-  function showTip(e, html) {
-    if (!tooltip) tooltip = $('<div class="vd-tooltip"></div>').appendTo('body');
-    tooltip.html(html);
-    tooltip.css({ top:e.pageY+14, left:e.pageX+14 }).show();
-  }
+  /* ================= RES / PROD ================= */
+  const getRes=()=>({
+    arm:parseNum($('#recursos-arm').data('cantidad')),
+    mun:parseNum($('#recursos-mun').data('cantidad')),
+    dol:parseNum($('#recursos-dol').data('cantidad'))
+  });
 
-  function hideTip() {
-    if (tooltip) tooltip.hide();
-  }
-
-  /* ==========================================================
-     DISABLE GAME TOOLTIPS
-  ========================================================== */
-  function disableGameTooltips($el) {
-    const attrs = [
-      'title','data-original-title','data-bs-original-title',
-      'data-title','aria-label','data-toggle','data-bs-toggle'
-    ];
-    $el.find('*').addBack().each(function () {
-      attrs.forEach(a => this.removeAttribute?.(a));
-      try { this.title = ''; } catch(e){}
+  function getProd(){
+    const p={arm:0,mun:0,dol:0};
+    $('.dropdown-produccion').each(function(){
+      const m=$(this).text().match(/\+([\d\.,]+)\/hora/);
+      if(!m) return;
+      const v=parseNum(m[1]);
+      if(this.id.includes('armas')) p.arm=v;
+      else if(this.id.includes('municion')) p.mun=v;
+      else if(this.id.includes('dolares')) p.dol=v;
     });
+    return p;
   }
 
-  /* ==========================================================
-     RESOURCES & PRODUCTION (shared)
-  ========================================================== */
-  function getResources() {
-    return {
-      arm: parseNum($('#recursos-arm').data('cantidad')),
-      mun: parseNum($('#recursos-mun').data('cantidad')),
-      dol: parseNum($('#recursos-dol').data('cantidad'))
-    };
-  }
+  /* ================= TRAINING ================= */
+  function processTraining(){
+    const r=getRes(), p=getProd();
 
-  function getProduction() {
-    const prod = { arm:0, mun:0, dol:0 };
+    $('.entrenamiento-item').each(function(){
+      $(this).find('.recursos-container .recurso:not(.tiempo)').each(function(){
+        const $r=$(this);
+        const span=$r.find('span').first();
+        const img=$r.find('img').attr('src')||'';
+        if(!span.length) return;
 
-    $('.dropdown-produccion').each(function () {
-      const m = $(this).text().match(/\+([\d\.,]+)\/hora/);
-      if (!m) return;
-      const val = parseNum(m[1]);
-
-      if (this.id.includes('armas')) prod.arm = val;
-      else if (this.id.includes('municion')) prod.mun = val;
-      else if (this.id.includes('dolares')) prod.dol = val;
-    });
-    return prod;
-  }
-
-  /* ==========================================================
-     ROOMS
-  ========================================================== */
-  function processRooms() {
-    const res = getResources();
-    const prod = getProduction();
-
-    $('.habitacion-item').each(function () {
-      const box = $(this);
-      const costs = {
-        arm: parseNum(box.data('costo-arm')),
-        mun: parseNum(box.data('costo-mun')),
-        dol: parseNum(box.data('costo-dol'))
-      };
-
-      box.find('.recurso').each(function () {
-        const $r = $(this);
-        const span = $r.find('span').first();
-        const img  = $r.find('img').attr('src') || '';
-        if (!span.length) return;
-
-        let type = null;
-        if (img.includes('/arm')) type = 'arm';
-        else if (img.includes('/mun')) type = 'mun';
-        else if (img.includes('/dol')) type = 'dol';
+        let t=null;
+        if(img.includes('/arm')) t='arm';
+        else if(img.includes('/mun')) t='mun';
+        else if(img.includes('/dol')) t='dol';
         else return;
 
-        disableGameTooltips($r);
-
-        const missing = Math.max(0, costs[type] - res[type]);
-        const prodVal = prod[type];
+        const cost=parseNum(span.text());
+        const miss=Math.max(0,cost-r[t]);
+        const prod=p[t];
 
         span.removeClass('vd-cost-ok vd-cost-bad')
-            .addClass(missing === 0 ? 'vd-cost-ok' : 'vd-cost-bad');
+            .addClass(miss? 'vd-cost-bad':'vd-cost-ok');
 
         span.off('.vdtip');
-        if (missing === 0) return;
+        if(!miss) return;
 
-        let html = `
-<span class="vd-label">Produzione/ora:</span> <span class="vd-prod">${formatThousands(prodVal)}</span><br>
-<span class="vd-label">Mancano:</span> <span class="vd-miss">${formatThousands(missing)}</span><br>
+        let html=`
+<span class="vd-label">Produzione/ora:</span> <span class="vd-prod">${fmt(prod)}</span><br>
+<span class="vd-label">Mancano:</span> <span class="vd-miss">${fmt(miss)}</span><br>
 `;
+        html+=prod>0
+          ? `<span class="vd-label">Costruibile tra:</span> <span class="vd-time">${fmtTime(Math.ceil(miss/prod*3600))}</span>`
+          : `<span class="vd-miss">Produzione assente</span>`;
 
-        if (prodVal > 0) {
-          const sec = Math.ceil(missing / prodVal * 3600);
-          html += `<span class="vd-label">Costruibile tra:</span> <span class="vd-time">${formatTime(sec)}</span>`;
-        } else {
-          html += `<span class="vd-miss">Produzione assente</span>`;
-        }
-
-        span.on('mousemove.vdtip', e => showTip(e, html))
-            .on('mouseleave.vdtip', hideTip);
+        span.on('mousemove.vdtip',e=>showTip(e,html))
+            .on('mouseleave.vdtip',hideTip);
       });
     });
   }
 
-  /* ==========================================================
-     TRAINING (NEU)
-  ========================================================== */
-  function processTraining() {
-    const res = getResources();
-    const prod = getProduction();
+  /* ================= PAGE ================= */
+  const isTraining=()=>location.pathname.includes('/entrenamiento');
 
-    $('.entrenamiento-item').each(function () {
-      const item = $(this);
-
-      item.find('.recursos-container .recurso').each(function () {
-        const $r = $(this);
-        const span = $r.find('span').first();
-        const img  = $r.find('img').attr('src') || '';
-        if (!span.length) return;
-
-        let type = null;
-        if (img.includes('/arm')) type = 'arm';
-        else if (img.includes('/mun')) type = 'mun';
-        else if (img.includes('/dol')) type = 'dol';
-        else return;
-
-        disableGameTooltips($r);
-
-        const cost = parseNum(span.text());
-        const missing = Math.max(0, cost - res[type]);
-        const prodVal = prod[type];
-
-        span.removeClass('vd-cost-ok vd-cost-bad')
-            .addClass(missing === 0 ? 'vd-cost-ok' : 'vd-cost-bad');
-
-        span.off('.vdtip');
-        if (missing === 0) return;
-
-        let html = `
-<span class="vd-label">Produzione/ora:</span> <span class="vd-prod">${formatThousands(prodVal)}</span><br>
-<span class="vd-label">Mancano:</span> <span class="vd-miss">${formatThousands(missing)}</span><br>
-`;
-
-        if (prodVal > 0) {
-          const sec = Math.ceil(missing / prodVal * 3600);
-          html += `<span class="vd-label">Costruibile tra:</span> <span class="vd-time">${formatTime(sec)}</span>`;
-        } else {
-          html += `<span class="vd-miss">Produzione assente</span>`;
-        }
-
-        span.on('mousemove.vdtip', e => showTip(e, html))
-            .on('mouseleave.vdtip', hideTip);
-      });
-    });
-  }
-
-  /* ==========================================================
-     PAGE DETECTION
-  ========================================================== */
-  function isRoomsPage() {
-    return location.pathname.includes('/habitaciones');
-  }
-
-  function isTrainingPage() {
-    return location.pathname.includes('/entrenamiento');
-  }
-
-  /* ==========================================================
-     BOOT
-  ========================================================== */
-  function boot() {
+  /* ================= BOOT ================= */
+  function boot(){
     ensureStyle();
-    if (isRoomsPage()) processRooms();
-    if (isTrainingPage()) processTraining();
-    setInterval(() => {
-      if (isRoomsPage()) processRooms();
-      if (isTrainingPage()) processTraining();
-    }, 3000);
+    if(isTraining()) processTraining();
+    setInterval(()=>isTraining()&&processTraining(),3000);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-
+  document.readyState==='loading'
+    ? document.addEventListener('DOMContentLoaded',boot)
+    : boot();
 })();
