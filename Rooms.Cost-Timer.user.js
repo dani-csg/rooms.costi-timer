@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Rooms - Costi & Timer (Nuovo Layout)
+// @name         mx.vendetta.rooms.cost-timer.
 // @namespace    mx.vendetta.rooms.cost-timer.
 // @version      2.0.0
 // @description  Colori costi + tooltip IT con produzione, risorse mancanti e tempo di attesa (Costruibile tra).
